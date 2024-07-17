@@ -13,7 +13,7 @@ warnings.filterwarnings('ignore')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 block_size = 4
 batch_size = 8
-torch.manual_seed(1)
+torch.manual_seed(1337)
 vocabulary_size = 0
 max_iters = 5000
 eval_interval = 100
@@ -95,6 +95,37 @@ def estimate_loss(model,eval_interval):
     model.train()
     return out
 
+'''
+    The Transformer model is a model that uses self-attention to process the input. We do not allow the model to view 
+    the future tokens as they have not been generated and we can accomplish this by making the upper triangle matrix to 
+    be -inf.
+'''
+
+class Head(nn.Module):
+    """ one head of self-attention """
+
+    def __init__(self, head_size):
+        super().__init__()
+        self.key = nn.Linear(n_embd, head_size, bias=False)
+        self.query = nn.Linear(n_embd, head_size, bias=False)
+        self.value = nn.Linear(n_embd, head_size, bias=False)
+        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        B,T,C = x.shape
+        k = self.key(x)   # (B,T,C)
+        q = self.query(x) # (B,T,C)
+        # compute attention scores ("affinities")
+        wei = q @ k.transpose(-2,-1) * C**-0.5 # (B, T, C) @ (B, C, T) -> (B, T, T)
+        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf')) # (B, T, T)
+        wei = F.softmax(wei, dim=-1) # (B, T, T)
+        wei = self.dropout(wei)
+        # perform the weighted aggregation of the values
+        v = self.value(x) # (B,T,C)
+        out = wei @ v # (B, T, T) @ (B, T, C) -> (B, T, C)
+        return out
 
 '''
     The Bigram Language Model is a simple model that uses the previous word to predict the next word.
@@ -103,15 +134,35 @@ def estimate_loss(model,eval_interval):
 '''
 
 
+class MultiLevelAttention(nn.Module):
+    def __init__(self, n_head, head_size):
+        super(MultiLevelAttention, self).__init__()
+        self.layers = nn.ModuleList([Head(head_size) for _ in range(n_head)])
+
+    def forward(self, x):
+        return torch.cat([l(x) for l in self.layers], dim=-1)
+
 class BigramLanguageModel(nn.Module):
     def __init__(self):
         super(BigramLanguageModel, self).__init__()
         self.token_embedding = nn.Embedding(vocabulary_size, n_embd)
+        self.Position_embedding = nn.Embedding(block_size, n_embd)
         self.lm_head = nn.Linear(n_embd, vocabulary_size)
 
+        self.Head = Head(n_embd)
+
     def forward(self, x, targets=None):
+
+        B, T = x.shape
+
         token_embedding = self.token_embedding(x)
-        logits = self.lm_head(token_embedding)
+        positional_embedding = self.Position_embedding(torch.arange(T).to(x.device))
+
+        idx = token_embedding + positional_embedding
+
+        idx = self.Head(idx)
+
+        logits = self.lm_head(idx)
 
         if targets is None:
             loss_Value = None
@@ -134,13 +185,16 @@ class BigramLanguageModel(nn.Module):
     def generate(self, idx, n):
         # Generate n tokens
         for _ in range(n):
+
+            idx_cond = idx[:, -block_size:]
+
             # get predication for the next token
             '''
                 We are getting the prediction for the next token.
                 This is done by passing the input through the model.
                 Ignoring the loss as we are not training the model.
             '''
-            logit, _ = self(idx)
+            logit, _ = self(idx_cond)
 
             # focusing on the last token
             '''
@@ -184,9 +238,9 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 num = 1000
 for i in range(num):
 
-    if i % eval_interval == 0:
-        Losses = estimate_loss(model, eval_interval)
-        print(f"Train Loss: {Losses['train']} Test Loss: {Losses['test']}")
+    # if i % eval_interval == 0:
+    #     Losses = estimate_loss(model, eval_interval)
+    #     print(f"Train Loss: {Losses['train']} Test Loss: {Losses['test']}")
 
     x, y = get_batch('train')
     output, loss = model(x, y)
