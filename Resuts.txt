@@ -1,0 +1,15 @@
+----Simple Attention
+Initial Loss =  11.923492431640625
+Final Loss =  2.9308042526245117
+
+----Multi-Headed Attention
+Initial Loss =  11.81047534942627
+Final Loss =  1.832019567489624
+
+Result : Marr waoE yAetbmeiigo gtyohareiai The etuE('Oega!amy mNiA<UNK> haeeo eutcvelotfh,ee <UNK>Arwtifi yeead ’irNe heh
+
+----Feed Forward Layer
+Initial Loss =  11.832260131835938
+Final Loss =  3.183969497680664
+
+Result : We heracE ybet meidgomg mErar iain te atute leoa! myomNiA<UNK> iB co futco loter, s iArwcifetye ad mirNne th
