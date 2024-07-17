@@ -59,8 +59,7 @@ def text_to_tensor(text):
     tensor = torch.tensor([char_to_int[char] for char in text], dtype=torch.long).to(device)
     return tensor.tolist()
 def tensor_to_text(tensor):
-    return ''.join([int_to_char[i] for i in tensor])
-
+    return ''.join([int_to_char.get(i, '<UNK>') for i in tensor])
 
 
 # Converting the data to tensors
@@ -128,28 +127,68 @@ class Head(nn.Module):
         return out
 
 '''
-    The Bigram Language Model is a simple model that uses the previous word to predict the next word.
-    It is a simple model that can be used to generate text.
-    It works on a statistical principle that the probability of a word depends on the previous word.
+    The MultiLevelAttention model is a model that uses multiple heads of self-attention to process the input.
+    This is just more than one head of self-attention.
 '''
-
-
 class MultiLevelAttention(nn.Module):
     def __init__(self, n_head, head_size):
         super(MultiLevelAttention, self).__init__()
         self.layers = nn.ModuleList([Head(head_size) for _ in range(n_head)])
 
     def forward(self, x):
-        return torch.cat([l(x) for l in self.layers], dim=-1)
+        return torch.sum(torch.stack([l(x) for l in self.layers]), dim=0)
 
+'''
+    The FeedFoward model is a simple model that uses a feedforward neural network to process the input.
+    In this case feedforward means that the input is passed through a neural network and the output is generated.
+'''
+class FeedFoward(nn.Module):
+    def __init__(self, n_embd):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(n_embd, 4 * n_embd),
+            nn.ReLU(),
+            nn.Linear(4 * n_embd, n_embd),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class Block(nn.Module):
+    """ Transformer block: communication followed by computation """
+
+    def __init__(self, n_embd, n_head):
+        # n_embd: embedding dimension, n_head: the number of heads we'd like
+        super().__init__()
+        head_size = n_embd // n_head
+        self.sa = MultiLevelAttention(n_head, head_size)
+        self.ffwd = FeedFoward(n_embd)
+        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.LayerNorm(n_embd)
+
+    def forward(self, x):
+        x = x + self.sa(self.ln1(x))
+        x = x + self.ffwd(self.ln2(x))
+        return x
+
+
+'''
+    The Bigram Language Model is a simple model that uses the previous word to predict the next word.
+    It is a simple model that can be used to generate text.
+    It works on a statistical principle that the probability of a word depends on the previous word.
+'''
 class BigramLanguageModel(nn.Module):
     def __init__(self):
         super(BigramLanguageModel, self).__init__()
         self.token_embedding = nn.Embedding(vocabulary_size, n_embd)
         self.Position_embedding = nn.Embedding(block_size, n_embd)
-        self.lm_head = nn.Linear(n_embd, vocabulary_size)
 
-        self.Head = Head(n_embd)
+        self.blocks = nn.Sequential(*[Block(n_embd, n_head=n_head) for _ in range(n_layer)])
+
+        self.ln_f = nn.LayerNorm(n_embd)  # final layer norm
+        self.lm_head = nn.Linear(n_embd, vocabulary_size)
 
     def forward(self, x, targets=None):
 
@@ -160,8 +199,8 @@ class BigramLanguageModel(nn.Module):
 
         idx = token_embedding + positional_embedding
 
-        idx = self.Head(idx)
-
+        idx = self.blocks(idx)  # (B,T,C)
+        idx = self.ln_f(idx)  # (B,T,C)
         logits = self.lm_head(idx)
 
         if targets is None:
@@ -229,25 +268,30 @@ class BigramLanguageModel(nn.Module):
         return idx
 
 
-model = BigramLanguageModel().to(device)
-'''
-    This will update the parameters by taking the gradient decent.
-'''
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+model = BigramLanguageModel()
+m = model.to(device)
+# print the number of parameters in the model
+print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
 
-num = 1000
-for i in range(num):
+# create a PyTorch optimizer
+optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
-    # if i % eval_interval == 0:
-    #     Losses = estimate_loss(model, eval_interval)
-    #     print(f"Train Loss: {Losses['train']} Test Loss: {Losses['test']}")
+for iter in range(max_iters):
 
-    x, y = get_batch('train')
-    output, loss = model(x, y)
+    # every once in a while evaluate the loss on train and val sets
+    if iter % eval_interval == 0 or iter == max_iters - 1:
+        losses = estimate_loss(m, eval_interval)
+        print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+
+    # sample a batch of data
+    xb, yb = get_batch('train')
+
+    # evaluate the loss
+    logits, loss = model(xb, yb)
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     optimizer.step()
-    if i == 0:
-        print("Initial Loss = ", loss.item())
 
-print("Final Loss = ", loss.item())
+# generate from the model
+context = torch.zeros((1, 1), dtype=torch.long, device=device)
+print (tensor_to_text(model.generate(context, 100)[0].tolist()))
