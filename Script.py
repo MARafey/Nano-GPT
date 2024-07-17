@@ -136,7 +136,7 @@ class MultiLevelAttention(nn.Module):
         self.layers = nn.ModuleList([Head(head_size) for _ in range(n_head)])
 
     def forward(self, x):
-        return torch.sum(torch.stack([l(x) for l in self.layers]), dim=0)
+        return torch.cat([l(x) for l in self.layers], dim=-1)
 
 '''
     The FeedFoward model is a simple model that uses a feedforward neural network to process the input.
@@ -281,7 +281,7 @@ for iter in range(max_iters):
     # every once in a while evaluate the loss on train and val sets
     if iter % eval_interval == 0 or iter == max_iters - 1:
         losses = estimate_loss(m, eval_interval)
-        print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        print(f'Iter {iter} Train loss: {losses["train"]:.3f} Test loss: {losses["test"]:.3f}')
 
     # sample a batch of data
     xb, yb = get_batch('train')
